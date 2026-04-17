@@ -73,13 +73,13 @@ pip install mujoco glfw opencv-python numpy pupil-apriltags
 如果环境已经配置完成，可以直接运行：
 
 ```bash
-python view_mujoco.py
+python3 view_mujoco.py
 ```
 
 如果想先检查模型是否正确加载：
 
 ```bash
-python check_model.py
+python3 check_model.py
 ```
 
 ## 键盘控制
