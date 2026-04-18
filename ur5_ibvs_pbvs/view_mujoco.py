@@ -10,7 +10,7 @@ from pupil_apriltags import Detector
 
 
 # 你的 MuJoCo 场景文件
-SCENE_XML = "/home/adrian/ur5_ibvs_pbvs/model/scene.xml"
+SCENE_XML = "/home/adrian/ur5-pbvs-mujoco-simulation/ur5_ibvs_pbvs/model/scene_with_gripper.xml"
 
 # 末端相机名称
 CAMERA_NAME = "end_effector_camera"
@@ -32,6 +32,7 @@ ACTUATOR_NAMES = [
     "wrist_2_vel_init",
     "wrist_3_vel_init",
 ]
+ARM_DOF_COUNT = len(ACTUATOR_NAMES)
 MAX_Q_DOT = 2.4
 MAX_TRACKING_Q_DOT = 3.4
 POSITION_GAIN = 2.0
@@ -425,8 +426,11 @@ def compute_joint_velocity_from_ee_velocity(model, data, site_name, v_e_desired_
 
     mujoco.mj_jacSite(model, data, jacp, jacr, site_id)
 
-    # 拼成 6xnv Jacobian
-    J = np.vstack([jacp, jacr])
+    # 拼成 6xnv Jacobian。
+    # 当前模型在 UR5 末端后又挂了 Robotiq 夹爪，所以 nv 已经不再是 6。
+    # 但视觉伺服只控制 UR5 的前 6 个关节，夹爪自由度不参与 PBVS 逆解。
+    J_full = np.vstack([jacp, jacr])
+    J = J_full[:, :ARM_DOF_COUNT]
 
     # 阻尼伪逆：J^T (J J^T + λ^2 I)^-1
     JT = J.T

@@ -59,7 +59,6 @@
     <mesh file="wrist3.obj"/>
     <mesh name="apriltag_plane" file="apriltag_plane.obj"/>
 
-
     <texture
       name="apriltag_tex"
       type="2d"
@@ -68,7 +67,6 @@
       height="100"
     />
     <material name="mat_white" rgba="1 1 1 1"/>
-
 
     <material
       name="apriltag_mat"
@@ -89,9 +87,6 @@
         conaffinity="0"
       />
     </body>
-
-
-
 
     <body name="base" quat="0 0 0 -1" childclass="ur5e">
       <inertial mass="4.0" pos="0 0 0" diaginertia="0.00443333156 0.00443333156 0.0072"/>
