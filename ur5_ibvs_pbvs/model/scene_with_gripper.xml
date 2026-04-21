@@ -41,5 +41,135 @@
   <worldbody>
     <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
     <geom name="floor" type="plane" size="0 0 0.05" material="groundplane"/>
+    <geom
+      name="conveyor_belt"
+      type="box"
+      pos="0.05 0.45 0.005"
+      size="0.28 0.09 0.005"
+      rgba="0.18 0.18 0.20 1"
+      contype="0"
+      conaffinity="0"
+    />
+    <body name="conveyor_belt_body" pos="0.05 0.45 0.011">
+      <joint
+        name="conveyor_joint"
+        type="slide"
+        axis="1 0 0"
+        range="-0.23 0.23"
+        damping="20"
+      />
+      <geom
+        name="conveyor_contact_plate"
+        type="box"
+        pos="0 0 0"
+        size="0.28 0.082 0.004"
+        rgba="0.12 0.12 0.14 1"
+        friction="3.0 0.10 0.01"
+      />
+      <geom
+        name="conveyor_visual_slat_0"
+        type="box"
+        pos="-0.22 0 0.005"
+        size="0.030 0.079 0.001"
+        rgba="0.24 0.24 0.26 1"
+        contype="0"
+        conaffinity="0"
+      />
+      <geom
+        name="conveyor_visual_slat_1"
+        type="box"
+        pos="-0.11 0 0.005"
+        size="0.030 0.079 0.001"
+        rgba="0.18 0.18 0.20 1"
+        contype="0"
+        conaffinity="0"
+      />
+      <geom
+        name="conveyor_visual_slat_2"
+        type="box"
+        pos="0 0 0.005"
+        size="0.030 0.079 0.001"
+        rgba="0.24 0.24 0.26 1"
+        contype="0"
+        conaffinity="0"
+      />
+      <geom
+        name="conveyor_visual_slat_3"
+        type="box"
+        pos="0.11 0 0.005"
+        size="0.030 0.079 0.001"
+        rgba="0.18 0.18 0.20 1"
+        contype="0"
+        conaffinity="0"
+      />
+      <geom
+        name="conveyor_visual_slat_4"
+        type="box"
+        pos="0.22 0 0.005"
+        size="0.030 0.079 0.001"
+        rgba="0.24 0.24 0.26 1"
+        contype="0"
+        conaffinity="0"
+      />
+    </body>
+    <geom
+      name="conveyor_side_left"
+      type="box"
+      pos="0.05 0.355 0.02"
+      size="0.28 0.005 0.02"
+      rgba="0.35 0.35 0.38 1"
+    />
+    <geom
+      name="conveyor_side_right"
+      type="box"
+      pos="0.05 0.545 0.02"
+      size="0.28 0.005 0.02"
+      rgba="0.35 0.35 0.38 1"
+    />
+    <geom
+      name="place_box_base"
+      type="box"
+      pos="-0.13 0.72 0.005"
+      size="0.10 0.10 0.005"
+      rgba="0.45 0.30 0.18 1"
+    />
+    <geom
+      name="place_box_wall_left"
+      type="box"
+      pos="-0.23 0.72 0.04"
+      size="0.005 0.10 0.04"
+      rgba="0.52 0.36 0.22 1"
+    />
+    <geom
+      name="place_box_wall_right"
+      type="box"
+      pos="-0.03 0.72 0.04"
+      size="0.005 0.10 0.04"
+      rgba="0.52 0.36 0.22 1"
+    />
+    <geom
+      name="place_box_wall_front"
+      type="box"
+      pos="-0.13 0.62 0.04"
+      size="0.10 0.005 0.04"
+      rgba="0.52 0.36 0.22 1"
+    />
+    <geom
+      name="place_box_wall_back"
+      type="box"
+      pos="-0.13 0.82 0.04"
+      size="0.10 0.005 0.04"
+      rgba="0.52 0.36 0.22 1"
+    />
   </worldbody>
+
+  <actuator>
+    <velocity
+      name="conveyor_drive"
+      joint="conveyor_joint"
+      kv="1500"
+      ctrlrange="-0.30 0.30"
+      forcerange="-800 800"
+    />
+  </actuator>
 </mujoco>
