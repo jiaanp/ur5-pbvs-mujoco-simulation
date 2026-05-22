@@ -3,11 +3,14 @@ import numpy as np
 
 SCENE_XML = "/home/adrian/ur5-pbvs-mujoco-simulation/ur5_ibvs_pbvs/model/scene_with_gripper.xml"
 CAMERA_NAME = "end_effector_camera"
+GLOBAL_CAMERA_NAME = "global_tracking_camera"
 SITE_NAME = "attachment_site"
 TARGET_BODY_NAME = "target"
 
 WIDTH = 640
 HEIGHT = 480
+ENABLE_GLOBAL_CAMERA_WINDOW = True
+USE_GLOBAL_CAMERA_FOR_SPEED = True
 
 TAG_SIZE = 0.05
 DESIRED_STANDOFF = 0.15
@@ -21,7 +24,7 @@ PINOCCHIO_EE_OFFSET_LOCAL = np.array(
 GRASP_TO_CAMERA_TRANSLATION = np.array([0.0, 0.0, 0.0], dtype=np.float64)
 GRASP_TO_CAMERA_ROTATION = np.eye(3, dtype=np.float64)
 GRASP_YAW_ABOUT_TAG_NORMAL_RAD = 0.0
-PLACE_BOX_CENTER_WORLD = np.array([-0.13, 0.72, 0.0], dtype=np.float64)
+PLACE_BOX_CENTER_WORLD = np.array([-0.13, 0.85, 0.0], dtype=np.float64)
 PLACE_RELEASE_HEIGHT = 0.30
 
 ACTUATOR_NAMES = [
@@ -53,7 +56,7 @@ TARGET_ROTATION_STEP_RAD = np.deg2rad(5.0)
 TARGET_LINEAR_FEEDFORWARD_GAIN = 1.8
 TARGET_ANGULAR_FEEDFORWARD_GAIN = 1.4
 TARGET_MOTION_SPEED_THRESHOLD = 1e-3
-PREDICTION_HORIZON = 60
+PREDICTION_HORIZON =40
 REFERENCE_PREVIEW_GAIN = 1.6
 SIM_STEPS_PER_CONTROL = 4
 LOST_TAG_HOLD_FRAMES = 8

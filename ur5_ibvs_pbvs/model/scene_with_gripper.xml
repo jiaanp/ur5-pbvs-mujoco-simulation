@@ -40,6 +40,12 @@
 
   <worldbody>
     <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <camera
+      name="global_tracking_camera"
+      pos="-0.05 0.60 0.50"
+      xyaxes="-1 0 0 0 -1 0.4"
+      fovy="55"
+    />
     <geom name="floor" type="plane" size="0 0 0.05" material="groundplane"/>
     <geom
       name="conveyor_belt"
@@ -129,36 +135,36 @@
     <geom
       name="place_box_base"
       type="box"
-      pos="-0.13 0.72 0.005"
-      size="0.10 0.10 0.005"
+      pos="-0.13 0.85 0.005"
+      size="0.20 0.20 0.005"
       rgba="0.45 0.30 0.18 1"
     />
     <geom
       name="place_box_wall_left"
       type="box"
-      pos="-0.23 0.72 0.04"
-      size="0.005 0.10 0.04"
+      pos="-0.33 0.85 0.083"
+      size="0.005 0.20 0.15"
       rgba="0.52 0.36 0.22 1"
     />
     <geom
       name="place_box_wall_right"
       type="box"
-      pos="-0.03 0.72 0.04"
-      size="0.005 0.10 0.04"
+      pos="0.07 0.85 0.083"
+      size="0.005 0.20 0.15"
       rgba="0.52 0.36 0.22 1"
     />
     <geom
       name="place_box_wall_front"
       type="box"
-      pos="-0.13 0.62 0.04"
-      size="0.10 0.005 0.04"
+      pos="-0.13 0.65 0.083"
+      size="0.20 0.005 0.15"
       rgba="0.52 0.36 0.22 1"
     />
     <geom
       name="place_box_wall_back"
       type="box"
-      pos="-0.13 0.82 0.04"
-      size="0.10 0.005 0.04"
+      pos="-0.13 1.05 0.083"
+      size="0.20 0.005 0.15"
       rgba="0.52 0.36 0.22 1"
     />
   </worldbody>
