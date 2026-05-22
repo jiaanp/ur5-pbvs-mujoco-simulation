@@ -24,7 +24,7 @@ PINOCCHIO_EE_OFFSET_LOCAL = np.array(
 GRASP_TO_CAMERA_TRANSLATION = np.array([0.0, 0.0, 0.0], dtype=np.float64)
 GRASP_TO_CAMERA_ROTATION = np.eye(3, dtype=np.float64)
 GRASP_YAW_ABOUT_TAG_NORMAL_RAD = 0.0
-PLACE_BOX_CENTER_WORLD = np.array([-0.13, 0.85, 0.0], dtype=np.float64)
+PLACE_BOX_CENTER_WORLD = np.array([-0.60, 0.0, 0.0], dtype=np.float64)
 PLACE_RELEASE_HEIGHT = 0.30
 
 ACTUATOR_NAMES = [
@@ -76,6 +76,24 @@ MAX_PLACE_Q_DOT = 4.0
 R_MJ_CAMERA_FROM_CV_CAMERA = np.diag([1.0, -1.0, -1.0])
 
 GRIPPER_ACTUATOR_NAME = "2f85_ctrl"
-GRIPPER_OPEN_CTRL = -60.0
-GRIPPER_CLOSE_CTRL = 5.0
-GRIPPER_CTRL_STEP = 2.0
+GRIPPER_OPEN_CTRL = -50.0
+GRIPPER_CLOSE_CTRL = 1.5
+GRIPPER_CTRL_STEP = 0.5
+
+# ===========================================================================
+# Box obstacle definitions (shared by MuJoCo XML and MoveIt PlanningScene)
+# ===========================================================================
+
+BOX_WALLS = [
+    {"name": "place_box_wall_left",  "type": "box", "pos": [-0.80, 0.0, 0.083], "size": [0.005, 0.20, 0.15]},
+    {"name": "place_box_wall_right", "type": "box", "pos": [-0.40, 0.0, 0.083], "size": [0.005, 0.20, 0.15]},
+    {"name": "place_box_wall_front", "type": "box", "pos": [-0.60, -0.20, 0.083], "size": [0.20, 0.005, 0.15]},
+    {"name": "place_box_wall_back",  "type": "box", "pos": [-0.60, 0.20, 0.083], "size": [0.20, 0.005, 0.15]},
+]
+
+PLACE_BOX_BASE_POS = [-0.60, 0.0, 0.005]
+PLACE_BOX_BASE_SIZE = [0.20, 0.20, 0.005]
+
+# MoveIt config
+MOVEIT_CONFIG_PATH = "/home/adrian/ur5-pbvs-mujoco-simulation/moveit2-learning/ur5_moveit_config"
+PLANNING_GROUP = "arm"
