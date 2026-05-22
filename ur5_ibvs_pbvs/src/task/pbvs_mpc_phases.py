@@ -274,3 +274,135 @@ def handle_place_phase_ompl(
     )
 
     return q_dot, done, wp_tracker
+
+
+def handle_lift_phase_ompl(
+    env,
+    model,
+    data,
+    robot_kin,
+    grasp_state_machine,
+    current_site_pos,
+    place_site_target_world,
+    actuator_names,
+    arm_dof_count,
+    vis,
+    height,
+    *,
+    wp_tracker=None,
+    max_q_dot=3.0,
+):
+    """
+    First call: run IK + OMPL planning to lift target, create WaypointTracker.
+    Subsequent calls: track waypoints via P control.
+    On completion: transitions state machine to place phase.
+
+    Returns:
+        (q_dot, done, wp_tracker)
+    """
+    if wp_tracker is None:
+        current_q = env.get_joint_positions(arm_dof_count)
+        lift_target = grasp_state_machine.lift_target_pos_world
+
+        # IK to lift target
+        goal_q = robot_kin.solve_ik_position(lift_target, current_q)
+
+        from src.planning.ompl_planner import plan_joint_space
+
+        waypoints = plan_joint_space(
+            model, data, current_q, goal_q,
+            target_geom_prefixes=[],  # no specific obstacle to avoid during lift
+            arm_dof=arm_dof_count,
+            planning_time=1.0,
+            planning_range=0.2,
+        )
+
+        if waypoints is None:
+            cv2.putText(
+                vis, "LIFT: OMPL FAILED",
+                (10, height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2,
+            )
+            return np.zeros(arm_dof_count, dtype=np.float64), False, None
+
+        wp_tracker = WaypointTracker(waypoints, max_q_dot=max_q_dot)
+
+    q_dot, done = wp_tracker.step(env.get_joint_positions(arm_dof_count))
+
+    if done:
+        q_dot[:] = 0.0
+        grasp_state_machine.start_place(
+            current_site_pos,
+            place_target_pos_world=place_site_target_world,
+        )
+
+    env.apply_joint_velocity(actuator_names, q_dot)
+
+    cv2.putText(
+        vis,
+        f"LIFTING (OMPL) wp={wp_tracker.index}/{len(wp_tracker.waypoints)}",
+        (10, height - 20),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2,
+    )
+
+    return q_dot, done, wp_tracker
+
+
+def handle_home_phase_ompl(
+    env,
+    model,
+    data,
+    robot_kin,
+    home_qpos,
+    grasp_state_machine,
+    actuator_names,
+    arm_dof_count,
+    vis,
+    height,
+    *,
+    wp_tracker=None,
+    max_q_dot=2.0,
+):
+    """
+    First call: OMPL planning from current q to home_qpos, create WaypointTracker.
+    Subsequent calls: track waypoints via P control.
+    On completion: marks done in state machine.
+
+    Returns:
+        (q_dot, done, wp_tracker)
+    """
+    if wp_tracker is None:
+        current_q = env.get_joint_positions(arm_dof_count)
+        goal_q = np.asarray(home_qpos, dtype=np.float64)
+
+        from src.planning.ompl_planner import plan_joint_space
+
+        waypoints = plan_joint_space(
+            model, data, current_q, goal_q,
+            target_geom_prefixes=["place_box_wall_"],  # avoid box on way home
+            arm_dof=arm_dof_count,
+            planning_time=2.0,
+            planning_range=0.2,
+        )
+
+        if waypoints is None:
+            # Fallback: fall through to direct P control in main script
+            return np.zeros(arm_dof_count, dtype=np.float64), False, None
+
+        wp_tracker = WaypointTracker(waypoints, max_q_dot=max_q_dot)
+
+    q_dot, done = wp_tracker.step(env.get_joint_positions(arm_dof_count))
+
+    if done:
+        q_dot[:] = 0.0
+        grasp_state_machine.mark_done()
+
+    env.apply_joint_velocity(actuator_names, q_dot)
+
+    cv2.putText(
+        vis,
+        f"RETURNING HOME (OMPL) wp={wp_tracker.index}/{len(wp_tracker.waypoints)}",
+        (10, height - 20),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2,
+    )
+
+    return q_dot, done, wp_tracker

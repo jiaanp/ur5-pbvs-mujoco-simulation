@@ -46,7 +46,9 @@ from src.config import (
 from src.task.pbvs_mpc_phases import (
     handle_done_phase,
     handle_home_phase,
+    handle_home_phase_ompl,
     handle_lift_phase,
+    handle_lift_phase_ompl,
     handle_place_phase,
     handle_place_phase_ompl,
     handle_release_phase,
@@ -108,6 +110,8 @@ def main():
     global_renderer = runtime["global_renderer"]
     prev_global_plane_point = None
     wp_tracker_place = None
+    wp_tracker_lift = None
+    wp_tracker_home = None
 
     try:
         with renderer.create_viewer() as viewer:
@@ -311,19 +315,20 @@ def main():
                     control_applied = True
 
                 if grasp_state_machine.phase == "lift" and grasp_state_machine.attached:
-                    last_q_dot = handle_lift_phase(
+                    last_q_dot, lift_done, wp_tracker_lift = handle_lift_phase_ompl(
                         env,
+                        model,
+                        data,
                         robot_kin,
-                        mpc_controller,
                         grasp_state_machine,
                         current_site_pos,
                         place_site_target_world,
-                        last_q_dot,
-                        vis,
                         ACTUATOR_NAMES,
                         ARM_DOF_COUNT,
+                        vis,
                         HEIGHT,
-                        MAX_TRANSPORT_Q_DOT,
+                        wp_tracker=wp_tracker_lift,
+                        max_q_dot=MAX_TRANSPORT_Q_DOT,
                     )
                     control_applied = True
 
@@ -348,17 +353,19 @@ def main():
                         release_frames_remaining = RELEASE_HOLD_FRAMES
 
                 if grasp_state_machine.phase == "home":
-                    last_q_dot = handle_home_phase(
+                    last_q_dot, home_done, wp_tracker_home = handle_home_phase_ompl(
                         env,
+                        model,
+                        data,
+                        robot_kin,
                         home_qpos,
                         grasp_state_machine,
-                        vis,
                         ACTUATOR_NAMES,
                         ARM_DOF_COUNT,
+                        vis,
                         HEIGHT,
-                        HOME_JOINT_KP,
-                        HOME_JOINT_TOL,
-                        HOME_MAX_Q_DOT,
+                        wp_tracker=wp_tracker_home,
+                        max_q_dot=HOME_MAX_Q_DOT,
                     )
                     control_applied = True
 
