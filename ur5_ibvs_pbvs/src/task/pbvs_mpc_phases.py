@@ -69,10 +69,6 @@ def handle_lift_phase(
         2,
     )
 
-    print("phase = lift")
-    print("lift_position_error_world =", np.round(lift_position_error_world, 4))
-    print("q_dot_lift =", np.round(q_dot_lift, 4))
-
     if lift_done:
         grasp_state_machine.start_place(
             current_site_pos,
@@ -120,9 +116,6 @@ def handle_place_phase(
         2,
     )
 
-    print("phase = place")
-    print("place_position_error_world =", np.round(place_position_error_world, 4))
-    print("q_dot_place =", np.round(q_dot_place, 4))
     return q_dot_place, place_done
 
 
@@ -158,9 +151,6 @@ def handle_home_phase(
         2,
     )
 
-    print("phase = home")
-    print("q_error =", np.round(q_error, 4))
-    print("q_dot_home =", np.round(q_dot_home, 4))
     return q_dot_home
 
 
@@ -176,3 +166,111 @@ def handle_done_phase(env, vis, actuator_names, arm_dof_count, height):
         2,
     )
     return np.zeros(arm_dof_count, dtype=np.float64)
+
+
+# ===========================================================================
+# OMPL obstacle-aware place phase
+# ===========================================================================
+
+
+class WaypointTracker:
+    """Joint-space waypoint tracker using P control."""
+
+    def __init__(self, waypoints, kp=4.0, max_q_dot=1.5, waypoint_tol=0.05):
+        self.waypoints = waypoints
+        self.index = 0
+        self.kp = float(kp)
+        self.max_q_dot = float(max_q_dot)
+        self.waypoint_tol = float(waypoint_tol)
+        self.done = False
+
+    def step(self, current_q):
+        """Compute joint velocity command to track next waypoint.
+
+        Returns:
+            (q_dot, done): q_dot ndarray[6], done bool
+        """
+        if self.done:
+            return np.zeros(len(current_q)), True
+
+        target = self.waypoints[self.index] if self.index < len(self.waypoints) else self.waypoints[-1]
+        current_q = np.asarray(current_q, dtype=np.float64)
+        q_error = target - current_q
+        q_dot = np.clip(self.kp * q_error, -self.max_q_dot, self.max_q_dot)
+
+        if np.linalg.norm(q_error) < self.waypoint_tol:
+            self.index += 1
+            if self.index >= len(self.waypoints):
+                self.done = True
+
+        return q_dot, self.done
+
+
+def handle_place_phase_ompl(
+    env,
+    model,
+    data,
+    robot_kin,
+    grasp_state_machine,
+    current_site_pos,
+    actuator_names,
+    arm_dof_count,
+    vis,
+    height,
+    *,
+    wp_tracker=None,
+    max_q_dot=1.5,
+):
+    """
+    First call: run IK + OMPL planning, create WaypointTracker.
+    Subsequent calls: track waypoints via P control.
+
+    Returns:
+        (q_dot, done, wp_tracker)
+    """
+    if wp_tracker is None:
+        current_q = env.get_joint_positions(arm_dof_count)
+        place_target_world = grasp_state_machine.place_target_pos_world
+
+        # Target: 5cm above box floor
+        drop_pos = place_target_world.copy()
+        drop_pos[2] = 0.05
+
+        # IK
+        goal_q = robot_kin.solve_ik_position(drop_pos, current_q)
+
+        # OMPL planning (avoid box walls)
+        from src.planning.ompl_planner import plan_joint_space
+
+        waypoints = plan_joint_space(
+            model, data, current_q, goal_q,
+            target_geom_prefixes=["place_box_wall_"],
+            arm_dof=arm_dof_count,
+            planning_time=3.0,
+            planning_range=0.2,
+        )
+
+        if waypoints is None:
+            cv2.putText(
+                vis, "PLACE: OMPL FAILED",
+                (10, height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2,
+            )
+            return np.zeros(arm_dof_count, dtype=np.float64), False, None
+
+        wp_tracker = WaypointTracker(waypoints, max_q_dot=max_q_dot)
+
+    q_dot, done = wp_tracker.step(env.get_joint_positions(arm_dof_count))
+
+    if done:
+        q_dot[:] = 0.0
+
+    env.apply_joint_velocity(actuator_names, q_dot)
+
+    cv2.putText(
+        vis,
+        f"PLACING (OMPL) wp={wp_tracker.index}/{len(wp_tracker.waypoints)}",
+        (10, height - 20),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2,
+    )
+
+    return q_dot, done, wp_tracker
