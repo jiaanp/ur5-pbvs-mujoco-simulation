@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 
 from src.perception.target_motion import TargetMotionController
+from src.utils.transforms import make_transform, rotation_matrix_to_quaternion
 
 
 def build_error_state_world(e_p_cam, e_r_cam, camera_rotation_world, r_mj_camera_from_cv_camera):
@@ -205,3 +206,49 @@ def solve_cartesian_transport_qdot(
         last_q_dot=last_q_dot,
     )
     return np.clip(q_dot, -max_q_dot, max_q_dot)
+
+
+def estimate_tag_world_pose_from_camera_observation(
+    camera_position_world,
+    camera_rotation_world,
+    t_camera_tag_cv,
+    r_mj_camera_from_cv_camera,
+):
+    """
+    根据某个相机观测到的 T_camera_tag（OpenCV 相机系），恢复目标在世界系下的位姿。
+    """
+    t_world_mj_camera = make_transform(camera_rotation_world, camera_position_world)
+    t_mj_camera_cv_camera = make_transform(r_mj_camera_from_cv_camera, np.zeros(3, dtype=np.float64))
+    t_world_tag = t_world_mj_camera @ t_mj_camera_cv_camera @ np.asarray(t_camera_tag_cv, dtype=np.float64)
+
+    world_pos = t_world_tag[:3, 3].copy()
+    world_quat = rotation_matrix_to_quaternion(t_world_tag[:3, :3])
+    return world_pos, world_quat, t_world_tag
+
+
+def project_image_point_to_world_plane(
+    pixel_uv,
+    camera_matrix,
+    camera_position_world,
+    camera_rotation_world,
+    r_mj_camera_from_cv_camera,
+    plane_z_world,
+):
+    """
+    将图像像素点通过相机模型投影到世界系 z=plane_z_world 的平面上。
+    这里用的是：
+    图像中心点 -> OpenCV 相机系射线 -> MuJoCo 相机局部系 -> 世界系 -> 与平面求交。
+    """
+    pixel_h = np.array([pixel_uv[0], pixel_uv[1], 1.0], dtype=np.float64)
+    ray_cv = np.linalg.inv(np.asarray(camera_matrix, dtype=np.float64)) @ pixel_h
+    ray_mj = np.asarray(r_mj_camera_from_cv_camera, dtype=np.float64) @ ray_cv
+    ray_world = np.asarray(camera_rotation_world, dtype=np.float64) @ ray_mj
+
+    if abs(ray_world[2]) < 1e-9:
+        return None
+
+    scale = (float(plane_z_world) - float(camera_position_world[2])) / float(ray_world[2])
+    if scale <= 0.0:
+        return None
+
+    return np.asarray(camera_position_world, dtype=np.float64) + scale * ray_world

@@ -1,5 +1,10 @@
 import numpy as np
 
+try:
+    import casadi as ca
+except ImportError:  # pragma: no cover - runtime fallback when CasADi is absent
+    ca = None
+
 
 class MPCController:
     """
@@ -27,6 +32,7 @@ class MPCController:
         r_weights=None,
         du_weights=None,
         qdot_limit=1.2,
+        backend="auto",
     ):
         # 预测步长
         self.horizon = int(horizon)
@@ -54,6 +60,17 @@ class MPCController:
             du_weights if du_weights is not None else [0.6, 0.6, 0.6, 0.3, 0.3, 0.3],
             dtype=np.float64,
         )
+
+        # 求解后端：
+        # - "auto": 优先 CasADi，不可用时回退到 numpy
+        # - "casadi": 强制使用 CasADi
+        # - "numpy": 强制使用原来的闭式解
+        self.backend = backend
+
+        # CasADi 求解器缓存，避免每一步都重新建图
+        self._casadi_solver_cache = {}
+        # 记录上一次最优控制序列，用于 warm start
+        self._last_solution_cache = {}
 
     def _build_prediction_matrices(self, A, B):
         """
@@ -121,20 +138,9 @@ class MPCController:
 
         return D
 
-    def solve(self, error_state_world, jacobian, last_q_dot=None, reference_trajectory=None):
+    def _prepare_inputs(self, error_state_world, jacobian, last_q_dot=None, reference_trajectory=None):
         """
-        求解当前时刻最优的第一步关节速度。
-
-        输入：
-        - error_state_world: 当前 6 维末端误差（世界系）
-        - jacobian: 当前 6xm Jacobian
-        - last_q_dot: 上一时刻的关节速度，用于平滑
-        - reference_trajectory:
-          未来 N 步的参考误差轨迹，shape = (N, n) 或 (N*n,)
-          如果不给，则默认每一步的参考都是 0
-
-        输出：
-        - q_dot_cmd: 当前时刻应该执行的关节速度
+        统一整理 MPC 输入，供不同求解后端复用。
         """
         x0 = np.asarray(error_state_world, dtype=np.float64).reshape(-1)
         J = np.asarray(jacobian, dtype=np.float64)
@@ -148,13 +154,6 @@ class MPCController:
         else:
             last_q_dot = np.asarray(last_q_dot, dtype=np.float64).reshape(-1)
 
-        # 线性预测模型：
-        # x_{k+1} = x_k - dt * J * u_k
-        A = np.eye(n, dtype=np.float64)
-        B = -self.dt * J
-
-        Sx, Su = self._build_prediction_matrices(A, B)
-
         if reference_trajectory is None:
             x_ref = np.zeros(N * n, dtype=np.float64)
         else:
@@ -164,13 +163,37 @@ class MPCController:
                     f"reference_trajectory has invalid size {x_ref.shape[0]}, expected {N * n}"
                 )
 
-        # 构造代价矩阵
-        Q = np.diag(self.q_weights)
-
         # 如果给的权重维度和控制维度不一致，就裁剪到 m
         R_vec = self.r_weights[:m] if self.r_weights.shape[0] != m else self.r_weights
         Rd_vec = self.du_weights[:m] if self.du_weights.shape[0] != m else self.du_weights
 
+        return x0, J, last_q_dot, x_ref, n, m
+
+    def _solve_numpy(self, x0, J, last_q_dot, x_ref, n, m):
+        """
+        原始 numpy 闭式解版本，作为回退后端保留。
+
+        输入：
+        - error_state_world: 当前 6 维末端误差（世界系）
+        - jacobian: 当前 6xm Jacobian
+        - last_q_dot: 上一时刻的关节速度，用于平滑
+        - reference_trajectory:
+          未来 N 步的参考误差轨迹，shape = (N, n) 或 (N*n,)
+          如果不给，则默认每一步的参考都是 0
+
+        输出：
+        - q_dot_cmd: 当前时刻应该执行的关节速度
+        """
+        N = self.horizon
+        A = np.eye(n, dtype=np.float64)
+        B = -self.dt * J
+
+        Sx, Su = self._build_prediction_matrices(A, B)
+
+        # 构造代价矩阵
+        Q = np.diag(self.q_weights)
+        R_vec = self.r_weights[:m] if self.r_weights.shape[0] != m else self.r_weights
+        Rd_vec = self.du_weights[:m] if self.du_weights.shape[0] != m else self.du_weights
         R = np.diag(R_vec)
         Rd = np.diag(Rd_vec)
 
@@ -206,3 +229,116 @@ class MPCController:
 
         # 只执行第一步，这就是 receding horizon control
         return U_star[0]
+
+    def _get_casadi_solver(self, n, m):
+        """
+        构造并缓存 CasADi QP 求解器。
+        """
+        if ca is None:
+            raise ImportError("CasADi is not installed.")
+
+        key = (n, m, self.horizon)
+        cached = self._casadi_solver_cache.get(key)
+        if cached is not None:
+            return cached
+
+        N = self.horizon
+
+        solver = ca.conic(
+            f"mpc_qp_solver_{n}_{m}_{N}",
+            "qpoases",
+            {
+                "h": ca.Sparsity.dense(N * m, N * m),
+                "a": ca.Sparsity.dense(0, N * m),
+            },
+            {
+                "printLevel": "none",
+            },
+        )
+
+        lbx = -self.qdot_limit * np.ones(N * m, dtype=np.float64)
+        ubx = self.qdot_limit * np.ones(N * m, dtype=np.float64)
+        x_init = np.zeros(N * m, dtype=np.float64)
+        lba = np.zeros(0, dtype=np.float64)
+        uba = np.zeros(0, dtype=np.float64)
+
+        bundle = {
+            "solver": solver,
+            "lbx": lbx,
+            "ubx": ubx,
+            "x_init": x_init,
+            "lba": lba,
+            "uba": uba,
+        }
+        self._casadi_solver_cache[key] = bundle
+        return bundle
+
+    def _solve_casadi(self, x0, J, last_q_dot, x_ref, n, m):
+        """
+        CasADi + qpOASES 版 MPC 求解。
+        """
+        solver_bundle = self._get_casadi_solver(n, m)
+        N = self.horizon
+
+        A = np.eye(n, dtype=np.float64)
+        B = -self.dt * J
+        Sx, Su = self._build_prediction_matrices(A, B)
+
+        Q = np.diag(self.q_weights)
+        R_vec = self.r_weights[:m] if self.r_weights.shape[0] != m else self.r_weights
+        Rd_vec = self.du_weights[:m] if self.du_weights.shape[0] != m else self.du_weights
+        R = np.diag(R_vec)
+        Rd = np.diag(Rd_vec)
+
+        Qbar = np.kron(np.eye(N), Q)
+        Rbar = np.kron(np.eye(N), R)
+        Rdbar = np.kron(np.eye(N), Rd)
+
+        D = self._build_difference_matrix(m)
+        d = np.zeros(N * m, dtype=np.float64)
+        d[:m] = last_q_dot
+
+        H = Su.T @ Qbar @ Su + Rbar + D.T @ Rdbar @ D
+        g = Su.T @ Qbar @ (Sx @ x0 - x_ref) - D.T @ Rdbar @ d
+        H = 0.5 * (H + H.T) + 1e-8 * np.eye(H.shape[0], dtype=np.float64)
+
+        cache_key = (n, m, N)
+        warm_start = self._last_solution_cache.get(cache_key, solver_bundle["x_init"])
+
+        result = solver_bundle["solver"](
+            h=ca.DM(H),
+            g=ca.DM(g),
+            x0=ca.DM(warm_start),
+            lbx=ca.DM(solver_bundle["lbx"]),
+            ubx=ca.DM(solver_bundle["ubx"]),
+            lba=ca.DM(solver_bundle["lba"]),
+            uba=ca.DM(solver_bundle["uba"]),
+        )
+
+        U_star = np.asarray(result["x"], dtype=np.float64).reshape(N, m)
+        self._last_solution_cache[cache_key] = np.vstack(
+            [U_star[1:], U_star[-1:]]
+        ).reshape(-1)
+        return U_star[0]
+
+    def solve(self, error_state_world, jacobian, last_q_dot=None, reference_trajectory=None):
+        """
+        求解当前时刻最优的第一步关节速度。
+        """
+        x0, J, last_q_dot, x_ref, n, m = self._prepare_inputs(
+            error_state_world,
+            jacobian,
+            last_q_dot=last_q_dot,
+            reference_trajectory=reference_trajectory,
+        )
+
+        backend = self.backend
+        if backend == "auto":
+            backend = "casadi" if ca is not None else "numpy"
+
+        if backend == "casadi":
+            return self._solve_casadi(x0, J, last_q_dot, x_ref, n, m)
+        if backend == "numpy":
+            return self._solve_numpy(x0, J, last_q_dot, x_ref, n, m)
+
+        raise ValueError(f"Unsupported MPC backend: {self.backend}")

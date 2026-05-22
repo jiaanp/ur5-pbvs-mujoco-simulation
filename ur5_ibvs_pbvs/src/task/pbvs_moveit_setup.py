@@ -1,14 +1,22 @@
 """
-MoveIt initialization for UR5e motion planning.
-Bridge between MuJoCo simulation and MoveIt 2 motion planning.
+MoveIt initialization for UR5e motion planning (MoveItPy API).
+Bridge between MuJoCo simulation and MoveIt 2 via moveit.planning.
 """
 
+import threading
 import time
 import numpy as np
 import rclpy
-from moveit_commander import MoveGroupCommander, PlanningSceneInterface, RobotCommander
-from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion
+from rclpy.node import Node
+from rclpy.executors import MultiThreadedExecutor
+
+from moveit.planning import MoveItPy
+from moveit.core.robot_state import RobotState
+from moveit_configs_utils import MoveItConfigsBuilder
+from moveit_msgs.msg import CollisionObject
 from shape_msgs.msg import SolidPrimitive
+from geometry_msgs.msg import Pose, PoseStamped
+from sensor_msgs.msg import JointState
 
 from src.config import (
     ARM_DOF_COUNT,
@@ -18,7 +26,6 @@ from src.config import (
     PLANNING_GROUP,
 )
 
-# Joint names in order -- must match MuJoCo's ordering
 JOINT_NAMES = [
     "shoulder_pan_joint",
     "shoulder_lift_joint",
@@ -29,139 +36,168 @@ JOINT_NAMES = [
 ]
 
 
-def init_moveit(wait_time=10.0):
-    """
-    Initialize ROS2 + MoveIt components.
+def _build_config_dict():
+    configs = MoveItConfigsBuilder("ur5", package_name="ur5_moveit_config").to_moveit_configs()
+    d = configs.to_dict()
+    if isinstance(d.get("planning_pipelines"), list):
+        d["planning_pipelines"] = {"pipeline_names": d["planning_pipelines"]}
+    for pk in ["ompl", "chomp", "pilz_industrial_motion_planner"]:
+        pipeline = d.get(pk, {})
+        if "planner_configs" in pipeline:
+            pipeline.setdefault("arm", {})
+            pipeline["arm"]["planner_configs"] = list(pipeline["planner_configs"].keys())
+    # Force RRTstar as default planner (finds shorter, less circuitous paths)
+    d.setdefault("ompl", {})
+    d["ompl"].setdefault("arm", {})
+    d["ompl"]["arm"]["default_planner_config"] = "RRTstar"
+    d["ompl"].setdefault("planner_configs", {})
+    d["ompl"]["planner_configs"]["RRTstar"] = {
+        "type": "geometric::RRTstar",
+        "range": 0.5,
+    }
+    d["plan_request_params"] = {"planning_pipeline": "ompl"}
+    d["moveit_simple_controller_manager"] = {
+        "controller_names": ["arm_controller"],
+        "arm_controller": {
+            "type": "FollowJointTrajectory",
+            "joints": JOINT_NAMES,
+            "action_ns": "follow_joint_trajectory",
+        },
+    }
+    return d
 
-    Returns:
-        dict with keys: "node", "move_group", "planning_scene", "robot_commander"
-    """
+
+def _make_box_collision(name, x, y, z, sx, sy, sz):
+    obj = CollisionObject()
+    obj.id = name
+    obj.header.frame_id = "base_link"
+    obj.operation = CollisionObject.ADD
+    box = SolidPrimitive()
+    box.type = SolidPrimitive.BOX
+    box.dimensions = [float(sx), float(sy), float(sz)]
+    pose = Pose()
+    pose.position.x = float(x)
+    pose.position.y = float(y)
+    pose.position.z = float(z)
+    pose.orientation.w = 1.0
+    obj.primitives = [box]
+    obj.primitive_poses = [pose]
+    return obj
+
+
+def init_moveit():
+    """Initialize ROS2 + MoveItPy. Returns dict with arm, publisher, etc."""
     rclpy.init(args=None)
-    node = rclpy.create_node("ur5_mujoco_moveit_bridge")
 
-    move_group = MoveGroupCommander(
-        PLANNING_GROUP,
-        wait_for_servers=wait_time,
-    )
-    # Set planning parameters
-    move_group.set_planning_time(3.0)
-    move_group.set_num_planning_attempts(3)
-    move_group.set_max_velocity_scaling_factor(0.5)
-    move_group.set_max_acceleration_scaling_factor(0.5)
+    config_dict = _build_config_dict()
+    moveit_py = MoveItPy(config_dict=config_dict, node_name="ur5_mujoco_moveit_bridge")
+    arm = moveit_py.get_planning_component(PLANNING_GROUP)
 
-    planning_scene = PlanningSceneInterface(synchronous=True)
-    robot_commander = RobotCommander()
+    # ROS node for collision objects + joint state publishing
+    bridge_node = Node("ur5_mujoco_bridge")
+    collision_pub = bridge_node.create_publisher(CollisionObject, "/collision_object", 10)
+    joint_state_pub = bridge_node.create_publisher(JointState, "/joint_states", 10)
+
+    # Multi-threaded executor
+    executor = MultiThreadedExecutor()
+    executor.add_node(bridge_node)
+    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+    spin_thread.start()
+    time.sleep(0.3)
+
+    # Add floor to prevent planning below ground (z=0)
+    collision_pub.publish(_make_box_collision("floor", 0.0, 0.0, -0.01, 2.0, 2.0, 0.02))
+
+    # Add box obstacles
+    for wall in BOX_WALLS:
+        collision_pub.publish(_make_box_collision(
+            wall["name"],
+            wall["pos"][0], wall["pos"][1], wall["pos"][2],
+            wall["size"][0], wall["size"][1], wall["size"][2],
+        ))
+    collision_pub.publish(_make_box_collision(
+        "place_box_base",
+        PLACE_BOX_BASE_POS[0], PLACE_BOX_BASE_POS[1], PLACE_BOX_BASE_POS[2],
+        PLACE_BOX_BASE_SIZE[0], PLACE_BOX_BASE_SIZE[1], PLACE_BOX_BASE_SIZE[2],
+    ))
+    time.sleep(0.5)
+
+    robot_model = moveit_py.get_robot_model()
 
     return {
-        "node": node,
-        "move_group": move_group,
-        "planning_scene": planning_scene,
-        "robot_commander": robot_commander,
+        "moveit_py": moveit_py,
+        "arm": arm,
+        "robot_model": robot_model,
+        "joint_state_pub": joint_state_pub,
+        "bridge_node": bridge_node,
     }
 
 
-def sync_mujoco_to_moveit(move_group, qpos, arm_dof=ARM_DOF_COUNT):
-    """
-    Copy MuJoCo current joint positions into MoveIt's RobotState.
-    Call this before each planning request so MoveIt plans from the
-    actual current arm configuration.
-    """
-    joint_values = {name: float(qpos[i]) for i, name in enumerate(JOINT_NAMES)}
-    move_group.set_joint_value_target(joint_values)
-    # set_joint_value_target with dict also updates internal RobotState
+def publish_joint_state(pub, qpos, arm_dof=ARM_DOF_COUNT):
+    """Publish current joint positions as /joint_states for RViz."""
+    msg = JointState()
+    msg.header.stamp = rclpy.clock.Clock().now().to_msg()
+    msg.name = JOINT_NAMES[:arm_dof]
+    msg.position = [float(qpos[i]) for i in range(arm_dof)]
+    pub.publish(msg)
 
 
-def add_box_to_planning_scene(planning_scene):
+def plan_to_pose_target_with_start(arm, robot_model, x, y, z, start_q_urdf):
     """
-    Add placement box (base + 4 walls) to MoveIt's collision scene.
-    Geometry comes from config.BOX_WALLS, PLACE_BOX_BASE_POS/SIZE.
+    Plan trajectory to Cartesian target, starting from given joint config (URDF space).
+    MoveIt's fix_start_state_collision adapter handles any slight model mismatch.
     """
-    # Small delay to ensure PlanningScene is ready
-    time.sleep(1.0)
-
-    # Add walls
-    for wall in BOX_WALLS:
-        p = wall["pos"]
-        s = wall["size"]
-        planning_scene.add_box(
-            name=wall["name"],
-            size=s,
-            pose=PoseStamped(
-                header={"frame_id": "world"},
-                pose=Pose(
-                    position=Point(x=float(p[0]), y=float(p[1]), z=float(p[2])),
-                    orientation=Quaternion(w=1.0, x=0.0, y=0.0, z=0.0),
-                ),
-            ),
-        )
-
-    # Add base
-    planning_scene.add_box(
-        name="place_box_base",
-        size=PLACE_BOX_BASE_SIZE,
-        pose=PoseStamped(
-            header={"frame_id": "world"},
-            pose=Pose(
-                position=Point(x=float(PLACE_BOX_BASE_POS[0]),
-                               y=float(PLACE_BOX_BASE_POS[1]),
-                               z=float(PLACE_BOX_BASE_POS[2])),
-                orientation=Quaternion(w=1.0, x=0.0, y=0.0, z=0.0),
-            ),
-        ),
+    start_state = RobotState(robot_model)
+    start_state.set_joint_group_positions(
+        PLANNING_GROUP, [float(v) for v in start_q_urdf[:6]],
     )
+    arm.set_start_state(robot_state=start_state)
+
+    pose = PoseStamped()
+    pose.header.frame_id = "base_link"
+    pose.pose.position.x = float(x)
+    pose.pose.position.y = float(y)
+    pose.pose.position.z = float(z)
+    # Orientation: tool0 Z pointing downward (world -Z)
+    # Quaternion = 180° about Y: cos(90°)=0, sin(90°)*(0,1,0) = (0,1,0)
+    pose.pose.orientation.x = 0.0
+    pose.pose.orientation.y = 1.0
+    pose.pose.orientation.z = 0.0
+    pose.pose.orientation.w = 0.0
+    arm.set_goal_state(pose_stamped_msg=pose, pose_link="tool0")
+    result = arm.plan()
+    if result and result.trajectory is not None:
+        return result.trajectory
+    return None
 
 
-def plan_to_joint_target(move_group, target_q):
-    """
-    Plan a trajectory to a joint-space target configuration.
-
-    Args:
-        move_group: MoveGroupCommander
-        target_q: list or ndarray of 6 joint angles
-
-    Returns:
-        RobotTrajectory on success, None on failure
-    """
-    target_q = [float(v) for v in target_q]
-    move_group.set_joint_value_target(target_q)
-    plan = move_group.plan()
-    if not plan or not plan.joint_trajectory.points:
-        return None
-    return plan
-
-
-def plan_to_pose_target(move_group, x, y, z):
-    """
-    Plan a trajectory to a Cartesian position target (orientation unconstrained).
-
-    Args:
-        move_group: MoveGroupCommander
-        x, y, z: world-frame target position
-
-    Returns:
-        RobotTrajectory on success, None on failure
-    """
-    move_group.set_position_target([float(x), float(y), float(z)])
-    plan = move_group.plan()
-    if not plan or not plan.joint_trajectory.points:
-        return None
-    return plan
+def plan_to_pose_target(arm, x, y, z):
+    """Plan trajectory to Cartesian position target from current internal state."""
+    pose = PoseStamped()
+    pose.header.frame_id = "base_link"
+    pose.pose.position.x = float(x)
+    pose.pose.position.y = float(y)
+    pose.pose.position.z = float(z)
+    # Orientation: tool0 Z pointing downward (world -Z)
+    # Quaternion = 180° about Y: cos(90°)=0, sin(90°)*(0,1,0) = (0,1,0)
+    pose.pose.orientation.x = 0.0
+    pose.pose.orientation.y = 1.0
+    pose.pose.orientation.z = 0.0
+    pose.pose.orientation.w = 0.0
+    arm.set_goal_state(pose_stamped_msg=pose, pose_link="tool0")
+    result = arm.plan()
+    if result and result.trajectory is not None:
+        return result.trajectory
+    return None
 
 
-def trajectory_to_waypoints(plan, arm_dof=ARM_DOF_COUNT):
-    """
-    Extract joint-space waypoints from a MoveIt trajectory plan.
-
-    Args:
-        plan: MoveIt plan result (RobotTrajectory)
-        arm_dof: number of arm joints to extract
-
-    Returns:
-        list of ndarray[arm_dof], one per trajectory point
-    """
-    traj = plan.joint_trajectory
+def trajectory_to_waypoints(traj, arm_dof=ARM_DOF_COUNT):
+    """Extract joint-space waypoints from a MoveIt RobotTrajectory."""
     waypoints = []
-    for point in traj.points:
+    if traj is None:
+        return waypoints
+    msg = traj.get_robot_trajectory_msg()
+    for point in msg.joint_trajectory.points:
         wp = np.array([point.positions[i] for i in range(arm_dof)])
         waypoints.append(wp)
     return waypoints

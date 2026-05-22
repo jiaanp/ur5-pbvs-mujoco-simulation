@@ -11,6 +11,8 @@ from src.config import (
     CONVEYOR_ENABLED,
     DESIRED_STANDOFF,
     EE_FRAME_NAME,
+    ENABLE_GLOBAL_CAMERA_WINDOW,
+    GLOBAL_CAMERA_NAME,
     GRASP_TO_CAMERA_ROTATION,
     GRASP_TO_CAMERA_TRANSLATION,
     GRIPPER_ACTUATOR_NAME,
@@ -80,6 +82,7 @@ def build_runtime(scene_xml):
         r_weights=[0.02, 0.02, 0.02, 0.012, 0.012, 0.012],
         du_weights=[0.10, 0.10, 0.10, 0.06, 0.06, 0.06],
         qdot_limit=MAX_Q_DOT,
+        backend="casadi",
     )
     tracking_mpc_controller = MPCController(
         horizon=PREDICTION_HORIZON,
@@ -88,10 +91,13 @@ def build_runtime(scene_xml):
         r_weights=[0.006, 0.006, 0.006, 0.004, 0.004, 0.004],
         du_weights=[0.025, 0.025, 0.025, 0.015, 0.015, 0.015],
         qdot_limit=MAX_TRACKING_Q_DOT,
+        backend="casadi",
     )
 
     camera_id = env.get_camera_id(CAMERA_NAME)
     camera_matrix = build_camera_matrix(model, camera_id, WIDTH, HEIGHT)
+    global_camera_id = env.get_camera_id(GLOBAL_CAMERA_NAME)
+    global_camera_matrix = build_camera_matrix(model, global_camera_id, WIDTH, HEIGHT)
     dist_coeffs = build_zero_distortion()
     detector = Detector(
         families="tag36h11",
@@ -168,6 +174,15 @@ def build_runtime(scene_xml):
         GRASP_TO_CAMERA_ROTATION,
         GRASP_TO_CAMERA_TRANSLATION,
     )
+    global_renderer = MujocoRenderer(
+        model,
+        data,
+        GLOBAL_CAMERA_NAME,
+        width=WIDTH,
+        height=HEIGHT,
+        window_name="Global Tracking Camera",
+        show_window=ENABLE_GLOBAL_CAMERA_WINDOW,
+    )
 
     return {
         "env": env,
@@ -182,6 +197,8 @@ def build_runtime(scene_xml):
         "tracking_mpc_controller": tracking_mpc_controller,
         "camera_id": camera_id,
         "camera_matrix": camera_matrix,
+        "global_camera_id": global_camera_id,
+        "global_camera_matrix": global_camera_matrix,
         "dist_coeffs": dist_coeffs,
         "detector": detector,
         "last_q_dot": last_q_dot,
@@ -203,4 +220,5 @@ def build_runtime(scene_xml):
         "home_qpos": home_qpos,
         "place_site_target_world": place_site_target_world,
         "t_grasp_camera": t_grasp_camera,
+        "global_renderer": global_renderer,
     }

@@ -315,20 +315,19 @@ def main():
                     control_applied = True
 
                 if grasp_state_machine.phase == "lift" and grasp_state_machine.attached:
-                    last_q_dot, lift_done, wp_tracker_lift = handle_lift_phase_ompl(
+                    last_q_dot = handle_lift_phase(
                         env,
-                        model,
-                        data,
                         robot_kin,
+                        mpc_controller,
                         grasp_state_machine,
                         current_site_pos,
                         place_site_target_world,
+                        last_q_dot,
+                        vis,
                         ACTUATOR_NAMES,
                         ARM_DOF_COUNT,
-                        vis,
                         HEIGHT,
-                        wp_tracker=wp_tracker_lift,
-                        max_q_dot=MAX_TRANSPORT_Q_DOT,
+                        MAX_TRANSPORT_Q_DOT,
                     )
                     control_applied = True
 

@@ -7,12 +7,14 @@ import numpy as np
 
 
 class MujocoRenderer:
-    def __init__(self, model, data, camera_name, width=640, height=480):
+    def __init__(self, model, data, camera_name, width=640, height=480, window_name=None, show_window=True):
         self.model = model
         self.data = data
         self.camera_name = camera_name
         self.width = width
         self.height = height
+        self.window_name = window_name or camera_name
+        self.show_window = bool(show_window)
 
         self.camera_id = mujoco.mj_name2id(
             model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name
@@ -45,8 +47,9 @@ class MujocoRenderer:
 
         mujoco.mjr_setBuffer(mujoco.mjtFramebuffer.mjFB_OFFSCREEN, self.context)
 
-        cv2.namedWindow("End-Effector Camera", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("End-Effector Camera", self.width, self.height)
+        if self.show_window:
+            cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(self.window_name, self.width, self.height)
 
     def render_camera_rgb(self):
         glfw.make_context_current(self.offscreen_window)
@@ -72,13 +75,15 @@ class MujocoRenderer:
         return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
     def show_camera_image(self, image):
-        cv2.imshow("End-Effector Camera", image)
+        if self.show_window:
+            cv2.imshow(self.window_name, image)
 
     def create_viewer(self):
         return mujoco.viewer.launch_passive(self.model, self.data)
 
     def close(self):
-        cv2.destroyAllWindows()
+        if self.show_window:
+            cv2.destroyWindow(self.window_name)
         if self.offscreen_window is not None:
             glfw.destroy_window(self.offscreen_window)
         glfw.terminate()

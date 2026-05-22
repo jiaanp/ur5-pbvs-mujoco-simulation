@@ -165,19 +165,6 @@ def run_visual_servo_step(
     elif phase == "approach" and locked_approach_camera_rotation_world is None:
         locked_approach_camera_rotation_world = camera_rotation_world.copy()
 
-    print("e_p_cam_raw =", np.round(e_p_cam_raw, 4))
-    print("e_r_cam_raw =", np.round(e_r_cam_raw, 4))
-    print("e_p_cam =", np.round(e_p_cam, 4))
-    print("e_r_cam =", np.round(e_r_cam, 4))
-    print("phase =", grasp_state_machine.phase)
-    print("attached =", grasp_state_machine.attached)
-    print("error_state_world =", np.round(error_state_world, 4))
-    print("tracking_target =", tracking_target)
-    print("target_motion_speed =", np.round(target_motion_speed, 4))
-    print("reference_trajectory[0] =", np.round(reference_trajectory[0], 4))
-    print("q_dot_mpc =", np.round(q_dot_mpc, 4))
-    print("q_dot =", np.round(q_dot, 4))
-
     return {
         "success": True,
         "vis": vis,
